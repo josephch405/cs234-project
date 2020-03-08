@@ -1,7 +1,8 @@
 import csv
 import numpy as np
-
 from sklearn.preprocessing import OneHotEncoder
+
+import models
 
 print("Loading data...")
 
@@ -42,8 +43,31 @@ Y = all_d[1:, 34].copy().astype(np.float)
 low = Y < 21
 medium = (Y >= 21) & (Y <= 49)
 high = Y > 49
-Y_categorical = np.stack([low, medium, high], axis=1)
+Y_categ = np.stack([low, medium, high], axis=1).astype(int)
 
 print("Running model...")
 
-model = 
+n_trials = 20 # normally 20 for real bandit runs
+model = models.FixedDose()
+
+def verifyPred(y):
+    assert sum(y) == 1
+    for j in y:
+        assert (j == 0 or j == 1)
+
+def calculateFractionCorrect(y, preds):
+    return (y * preds).sum() / y.shape[0]
+
+for i in range(n_trials):
+    shuffled_order = np.arange(X.shape[0])
+    np.random.shuffle(shuffled_order)
+    X_shuffled, Y_categ_shuffled = X[shuffled_order], Y_categ[shuffled_order]
+    preds = []
+    for x in X_shuffled:
+        pred = model.predict_sample(X)
+        verifyPred(pred)
+        preds.append(pred)
+    preds = np.array(preds)
+
+    # TODO: account for multiple trial scoring
+    print(calculateFractionCorrect(Y_categ_shuffled, preds))
