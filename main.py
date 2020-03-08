@@ -1,6 +1,7 @@
 import csv
 import numpy as np
 from sklearn.preprocessing import OneHotEncoder
+from tqdm import tqdm
 
 import models
 
@@ -41,8 +42,8 @@ for i in numerical_feature_indices + bad_features_indices + unhelpful_features_i
 categorical_feature_names = feature_indices_to_names(categorical_feature_indices)
 categorical_features = all_d[1:, categorical_feature_indices].copy()
 
-# encoder = OneHotEncoder()
-# fitted_categorical_features = encoder.fit_transform(categorical_features).toarray()
+encoder = OneHotEncoder()
+encoder.fit(categorical_features)
 
 X = np.append(numerical_features, categorical_features, axis=1)
 X_feature_names = numerical_feature_names + categorical_feature_names
@@ -57,26 +58,42 @@ Y_categ = np.stack([low, medium, high], axis=1).astype(int)
 
 print("Running model...")
 
-n_trials = 20 # normally 20 for real bandit runs
-model = models.ClinicalAlgo()
+n_trials = 5 # normally 20 for real bandit runs
+bestModel = models.OracleLinearModel(X, Y_categ, encoder, len(numerical_feature_indices))
+model = models.LinearBasic(encoder, len(numerical_feature_indices))
 
 def verifyPred(y):
     assert sum(y) == 1
+    assert y.shape[0] == 3 and len(y.shape) == 1
     for j in y:
         assert (j == 0 or j == 1)
 
+def calculateNumberCorrect(y, preds):
+    return (y * preds).sum()
+
 def calculateFractionCorrect(y, preds):
-    return (y * preds).sum() / y.shape[0]
+    return calculateNumberCorrect(y, preds) / y.shape[0]
+
+def calculateReward(y, pred):
+    if np.argmax(y) == np.argmax(pred):
+        return 0
+    return -1
 
 for i in range(n_trials):
     shuffled_order = np.arange(X.shape[0])
     np.random.shuffle(shuffled_order)
     X_shuffled, Y_categ_shuffled = X[shuffled_order], Y_categ[shuffled_order]
+    Y_best = bestModel.predict(X_shuffled)
+    best_correctness = calculateFractionCorrect(Y_categ_shuffled, Y_best)
+
     preds = []
-    for x in X_shuffled:
+    for x, y in tqdm(list(zip(X_shuffled, Y_categ_shuffled))):
         pred = model.predict_sample(x)
         verifyPred(pred)
         preds.append(pred)
+        r = calculateReward(y, pred)
+        model.feed_reward(r)
+
     preds = np.array(preds)
 
     # TODO: account for multiple trial scoring

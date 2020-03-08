@@ -1,4 +1,5 @@
 import numpy as np
+import math
 
 def getAgeInDecades(x):
     decadeStr = x[5]
@@ -49,6 +50,9 @@ class Model:
     def predict_sample(self, x):
         raise NotImplementedError
 
+    def feed_reward(self, r):
+        pass
+
 class FixedDose(Model):
     def predict(self, X):
         Y = np.zeros([X.shape[0], 3])
@@ -81,3 +85,80 @@ class ClinicalAlgo(Model):
         dosage = dosage * dosage
 
         return dosageToAction(dosage)
+
+class OracleLinearModel(Model):
+    def __init__(self, X, Y, one_hot_encoder, n_numerical_feats):
+        super(Model, OracleLinearModel).__init__(self)
+        from sklearn.linear_model import LogisticRegression
+        self.encoder = one_hot_encoder
+        self.model = LogisticRegression()
+        self.n_numerical_feats = n_numerical_feats
+
+        X_numer = X[:, :n_numerical_feats].astype(np.float)
+        X_categ = self.encoder.transform(X[:, n_numerical_feats:]).toarray()
+        X_float = np.concatenate([X_numer, X_categ], axis=1)
+
+        Y_labels = np.argmax(Y, axis=1)
+
+        self.model.fit(X_float, Y_labels)
+        # print(self.model.score(X_float, Y_labels))
+    
+    def predict(self, X):
+        n = self.n_numerical_feats
+        X_numer = X[:, :n].astype(np.float)
+        X_categ = self.encoder.transform(X[:, n:]).toarray()
+        X_float = np.concatenate([X_numer, X_categ], axis=1)
+
+        p_labels = self.model.predict(X_float)
+        results = np.zeros([X.shape[0], 3])
+        results[np.arange(p_labels.size), p_labels] = 1
+        return results
+
+    
+    def predict_sample(self, x):
+        n = self.n_numerical_feats
+
+        x_numer = x[:n].astype(np.float).reshape(1, -1)
+        x_categ = self.encoder.transform(x[n:].reshape(1, -1)).toarray()
+        x_float = np.concatenate([x_numer, x_categ], axis=1)
+
+        result = self.model.predict(x_float)
+        b = [0, 0, 0]
+        b[result[0]] = 1
+        return np.array(b)
+
+def sigmoid(x):
+    return 1 / (1 + math.exp(-x))
+
+class LinearBasic(Model):
+    def __init__(self, one_hot_encoder, n_numerical_feats):
+        super(Model, OracleLinearModel).__init__(self)
+        self.n_numerical_feats = n_numerical_feats
+        # Low, medium, high
+        self.encoder = one_hot_encoder
+        self.beta = np.random.rand(3, n_numerical_feats + len(self.encoder.get_feature_names()))
+        
+    def predict_sample(self, x):
+        n = self.n_numerical_feats
+        # size [3] array of predictions
+        x_numer = x[:n].astype(np.float).reshape(1, -1)
+        x_categ = self.encoder.transform(x[n:].reshape(1, -1)).toarray()
+        x_float = np.concatenate([x_numer, x_categ], axis=1).reshape(-1)
+
+        self.pred_r = self.beta.dot(x_float)
+        self.x_float = x_float
+        self.action = np.argmax(self.pred_r)
+        result = np.array([0, 0, 0])
+        result[self.action] = 1
+        return result
+
+    def feed_reward(self, r):
+        # sig = sigmoid(self.pred_r[self.action] + .5)
+        # scale = sig * (1 - sig)
+        scale = 0.01
+        # self.beta[self.action] += scale * self.x_float * 0.1
+        if r > -1:
+            # if self.pred_r[self.action] < 0:
+            self.beta[self.action] += self.x_float * scale
+        else:
+            self.beta[self.action] -= self.x_float * scale
