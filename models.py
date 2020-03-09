@@ -33,11 +33,13 @@ def amiodaroneStatus(x):
     return x[20] == 1
 
 def dosageToAction(d):
+    result = [0, 1, 0]
     if d < 21:
-        return [1, 0, 0]
+        result = [1, 0, 0]
     elif d > 49:
-        return [0, 0, 1]
-    return [0, 1, 0]
+        result = [0, 0, 1]
+    
+    return np.array(result)
 
 class Model:
     # X: [n, feature_length]
@@ -193,4 +195,4 @@ class LinUCB(Model):
 
     def feed_reward(self, r):
         self.A[self.action] += np.outer(self.x_float, self.x_float)
-        self.b[self.action] += r * self.x_float
+        self.b[self.action] += 2 * r * self.x_float
