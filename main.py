@@ -4,6 +4,7 @@ from sklearn.preprocessing import OneHotEncoder
 from tqdm import tqdm
 
 import models
+import matplotlib.pyplot as plt
 
 print("Loading data...")
 
@@ -37,8 +38,9 @@ bad_features_indices = [0, 33, 34, 35]
 # Categorical features with a lot of text/descriptions
 unhelpful_features_indices = [8, 12, 30]
 
-for i in numerical_feature_indices + bad_features_indices + unhelpful_features_indices:
-    categorical_feature_indices.remove(i)
+# for i in numerical_feature_indices + bad_features_indices + unhelpful_features_indices:
+#     categorical_feature_indices.remove(i)
+categorical_feature_indices = [4, 2, 23, 24, 25, 26]
 categorical_feature_names = feature_indices_to_names(categorical_feature_indices)
 categorical_features = all_d[1:, categorical_feature_indices].copy()
 
@@ -47,6 +49,15 @@ encoder.fit(categorical_features)
 
 X = np.append(numerical_features, categorical_features, axis=1)
 X_feature_names = numerical_feature_names + categorical_feature_names
+n_num = len(numerical_feature_indices)
+X_numer = X[:, :n_num].astype(np.float)
+def preprocess_num_feats(X_numer):
+    for i in range(2):
+        X_numer[:, i] -= np.min(X_numer[:, i])
+        X_numer[:, i] /= np.max(X_numer[:, i])
+preprocess_num_feats(X_numer)
+X_categ = encoder.transform(X[:, n_num:]).toarray()
+X_float = np.concatenate([X_numer, X_categ], axis=1)
 
 print("Building Y...")
 Y = all_d[1:, 34].copy().astype(np.float)
@@ -58,9 +69,11 @@ Y_categ = np.stack([low, medium, high], axis=1).astype(int)
 
 print("Running model...")
 
-n_trials = 5 # normally 20 for real bandit runs
-bestModel = models.OracleLinearModel(X, Y_categ, encoder, len(numerical_feature_indices))
-model = models.LinearBasic(encoder, len(numerical_feature_indices))
+n_trials = 1 # normally 20 for real bandit runs
+bestModel = models.OracleLinearModel(X, Y_categ, X_float)
+Y_best = bestModel.predict(X, X_float)
+best_score = bestModel.model.score(X_float, np.argmax(Y_categ, axis=-1))
+print("Best model:" + str(best_score))
 
 def verifyPred(y):
     assert sum(y) == 1
@@ -79,22 +92,65 @@ def calculateReward(y, pred):
         return 0
     return -1
 
+n_float_features = len(X_float[0])
+
+all_regrets = []
+all_frac_wrong = []
+all_fixed_regrets = []
+
 for i in range(n_trials):
+    # model = models.FixedDose()
+    model = models.LinUCB(n_float_features, alpha=0.5)
     shuffled_order = np.arange(X.shape[0])
     np.random.shuffle(shuffled_order)
-    X_shuffled, Y_categ_shuffled = X[shuffled_order], Y_categ[shuffled_order]
-    Y_best = bestModel.predict(X_shuffled)
+    X_shuffled, X_float_shuffled = \
+        X[shuffled_order], X_float[shuffled_order]
+    Y_best_shuffled, Y_categ_shuffled = Y_best[shuffled_order], Y_categ[shuffled_order] 
     best_correctness = calculateFractionCorrect(Y_categ_shuffled, Y_best)
 
     preds = []
-    for x, y in tqdm(list(zip(X_shuffled, Y_categ_shuffled))):
-        pred = model.predict_sample(x)
+    regrets = []
+    regret = 0
+    n_wrong = 0
+    n_total = 0
+    cum_fraction_wrong = []
+
+    fixed_regret = 0
+    fixed_regrets = []
+
+    for x, y, x_float, y_best in tqdm(list( \
+        zip(X_shuffled, Y_categ_shuffled, X_float_shuffled, Y_best_shuffled))):
+        pred = model.predict_sample(x, x_float)
         verifyPred(pred)
         preds.append(pred)
         r = calculateReward(y, pred)
         model.feed_reward(r)
 
+        n_total += 1
+        if np.sum(pred.dot(y)) == 0:
+            n_wrong += 1
+        if np.sum(y_best.dot(y)) > 0:
+            # possibly suffer regret
+            if np.sum(pred.dot(y)) == 0:
+                regret += 1
+            if not y[1]:
+                # fixed model suffers regret
+                fixed_regret += 1
+        regrets.append(regret)
+        fixed_regrets.append(fixed_regret)
+        cum_fraction_wrong.append(n_wrong / n_total)
+
+
     preds = np.array(preds)
 
     # TODO: account for multiple trial scoring
     print(calculateFractionCorrect(Y_categ_shuffled, preds))
+    all_regrets += [regrets]
+    all_frac_wrong += [cum_fraction_wrong]
+    all_fixed_regrets += [fixed_regrets]
+
+plt.plot(all_regrets[0])
+plt.plot(all_fixed_regrets[0])
+plt.show()
+plt.plot(all_frac_wrong[0])
+plt.show()
