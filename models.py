@@ -128,6 +128,50 @@ class LinearSLModel(Model):
             #print(self.X.shape)
             self.Y = np.append(self.Y,r)
 
+class SVMModel(Model):
+    def __init__(self, d):
+        super(Model, LinearSLModel).__init__(self)
+        from sklearn import svm
+        self.model = svm.SVC(gamma='scale')
+        self.X = None
+        self.Y = None
+        self.x = None
+
+    # x: [feature_length]
+    # Returns Y: [3], corresponding to low, medium, high
+    def predict_sample(self, x, x_float=None):
+
+        self.x = x_float
+        if self.X is not None:
+            if not np.array_equal(self.Y, np.full(self.Y.shape, self.Y[0])): 
+                self.model.fit(self.X, self.Y)
+                result = self.model.predict(x_float.reshape(1, -1))
+            else:
+                result = self.Y[0]
+            #print(result)
+            b = [0, 0, 0]
+            if result < 0.5:
+                b[0] = 1
+            elif result < 1.5:
+                b[1] = 1
+            else:
+                b[2] = 1
+            return np.array(b)
+            
+        else:
+            return np.array([0, 1, 0])
+
+    def feed_label(self, r):
+        r = np.argmax(r)
+        if self.X is None:
+            self.X = self.x.reshape(1, -1)
+            self.Y = np.array([r])
+        else:
+            self.X = np.append(self.X, self.x.reshape(1, -1), axis=0)
+            #print(self.X.shape)
+            self.Y = np.append(self.Y,r)
+
+
 class OracleLinearModel(Model):
     def __init__(self, X, Y, X_float):
         super(Model, OracleLinearModel).__init__(self)

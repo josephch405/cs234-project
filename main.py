@@ -123,9 +123,10 @@ all_fixed_regrets = []
 all_clin_regrets = []
 
 for i in range(n_trials):
-    # model = models.FixedDose()
+    #model = models.FixedDose()
     model = models.LinUCB(n_float_features, alpha=1)
     #model = models.LinearSLModel(n_float_features)
+    #model = models.SVMModel(n_float_features)
 
     shuffled_order = np.arange(X.shape[0])
     np.random.shuffle(shuffled_order)
