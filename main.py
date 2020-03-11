@@ -1,6 +1,7 @@
 import csv
 import numpy as np
 from sklearn.preprocessing import OneHotEncoder
+import scipy.stats as st
 from tqdm import tqdm
 
 import models
@@ -75,7 +76,7 @@ Y_categ = np.stack([low, medium, high], axis=1).astype(int)
 
 print("Running model...")
 
-n_trials = 1 # normally 20 for real bandit runs
+n_trials = 20 # normally 20 for real bandit runs
 bestModel = models.OracleLinearModel(X, Y_categ, X_float)
 Y_best = bestModel.predict(X, X_float)
 best_score = bestModel.model.score(X_float, np.argmax(Y_categ, axis=-1))
@@ -99,6 +100,20 @@ def calculateReward(y, pred):
     if np.argmax(y) == np.argmax(pred):
         return 0
     return -1
+
+def calculateConfidenceInterval(a):
+    [lower, upper] = st.t.interval(0.95, len(a)-1, loc=np.mean(a), scale=st.sem(a))
+    return [lower, upper]
+
+def computeCI(all):
+    lows = []
+    ups = []
+    all_col = list(zip(*all))
+    for sample in all_col:
+        [low, up] = calculateConfidenceInterval(sample)
+        lows.append(low)
+        ups.append(up)
+    return lows, ups
 
 n_float_features = len(X_float[0])
 
@@ -158,16 +173,41 @@ for i in range(n_trials):
 
     preds = np.array(preds)
 
-    # TODO: account for multiple trial scoring
+    # account for multiple trial scoring
     print(calculateFractionCorrect(Y_categ_shuffled, preds))
     all_regrets += [regrets]
     all_frac_wrong += [cum_fraction_wrong]
     all_fixed_regrets += [fixed_regrets]
     all_clin_regrets += [clin_regrets]
 
-plt.plot(all_regrets[0])
-plt.plot(all_fixed_regrets[0])
-plt.plot(all_clin_regrets[0])
+# compute 95% confidence interval for each performance mentric
+[regrets_low, regrets_up] = computeCI(all_regrets)
+[fixed_regrets_low, fixed_regrets_up] = computeCI(all_fixed_regrets)
+[clin_regrets_low, clin_regrets_up] = computeCI(all_clin_regrets)
+[fracs_wrong_low, fracs_wrong_up] = computeCI(all_frac_wrong)
+
+plt.plot(np.mean(all_regrets, axis=0))
+plt.plot(np.mean(all_fixed_regrets, axis=0))
+plt.plot(np.mean(all_clin_regrets, axis=0))
+plt.legend(['all regrets', 'all fixed regrets', 'all clin regrets'])
 plt.show()
-plt.plot(all_frac_wrong[0])
+
+plt.plot(np.mean(all_regrets, axis=0))
+plt.plot(regrets_low, linestyle=':')
+plt.plot(regrets_up, linestyle=':')
+plt.plot(np.mean(all_fixed_regrets, axis=0))
+plt.plot(fixed_regrets_low, linestyle=':')
+plt.plot(fixed_regrets_up, linestyle=':')
+plt.plot(np.mean(all_clin_regrets, axis=0))
+plt.plot(clin_regrets_low, linestyle=':')
+plt.plot(clin_regrets_up, linestyle=':')
+plt.legend(['all regrets', 'all regret lower 95% CI bound', 'all regret upper 95% CI bound', \
+    'all fixed regrets', 'fixed regret lower 95% CI bound', 'fixed regret upper 95% CI bound' \
+    'all clinical regrets', 'clinical regret lower 95% CI bound', 'clinical regret upper 95% CI bound'])
+plt.show()
+
+plt.plot(np.mean(all_frac_wrong, axis=0))
+plt.plot(fracs_wrong_low, linestyle=':')
+plt.plot(fracs_wrong_up, linestyle=':')
+plt.legend(['Fraction of incorrect dosage', 'lower 95% CI bound', 'upper 95% CI bound'])
 plt.show()
