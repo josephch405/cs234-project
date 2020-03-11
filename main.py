@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.preprocessing import OneHotEncoder
 import scipy.stats as st
 from tqdm import tqdm
+from sklearn.preprocessing import normalize
 
 import models
 import matplotlib.pyplot as plt
@@ -65,6 +66,7 @@ def preprocess_num_feats(X_numer):
 preprocess_num_feats(X_numer)
 X_categ = encoder.transform(X_subset[:, n_num:]).toarray()
 X_float = np.concatenate([X_numer, X_categ], axis=1)
+X_float = normalize(X_float, axis=1, norm='l2')
 
 print("Building Y...")
 Y = all_d[1:, 34].copy().astype(np.float)
@@ -120,7 +122,9 @@ n_float_features = len(X_float[0])
 all_regrets = []
 all_frac_wrong = []
 all_fixed_regrets = []
+all_fixed_frac_wrong = []
 all_clin_regrets = []
+all_clin_frac_wrong = []
 
 for i in range(n_trials):
     # model = models.FixedDose()
@@ -141,8 +145,12 @@ for i in range(n_trials):
 
     fixed_regret = 0
     fixed_regrets = []
+    fixed_fraction_wrong = []
+    fixed_n_wrong = 0
     clin_regret = 0
     clin_regrets = []
+    clin_fraction_wrong = []
+    clin_n_wrong = 0
 
     for x, y, x_float, y_best in tqdm(list( \
         zip(X_shuffled, Y_categ_shuffled, X_float_shuffled, Y_best_shuffled))):
@@ -152,15 +160,20 @@ for i in range(n_trials):
         r = calculateReward(y, pred)
         model.feed_reward(r)
 
+        clinPred = clinModel.predict_sample(x)
+
         n_total += 1
         if np.sum(pred.dot(y)) == 0:
             n_wrong += 1
+        if np.sum(clinPred.dot(y)) == 0:
+            clin_n_wrong += 1
+        if not y[1]:
+            fixed_n_wrong += 1
         if np.sum(y_best.dot(y)) > 0:
             # possibly suffer regret
             if np.sum(pred.dot(y)) == 0:
                 regret += 1
             # baselin models suffers regret
-            clinPred = clinModel.predict_sample(x)
             if clinPred.dot(y) == 0:
                 clin_regret += 1
             if not y[1]:
@@ -168,7 +181,10 @@ for i in range(n_trials):
         regrets.append(regret)
         fixed_regrets.append(fixed_regret)
         clin_regrets.append(clin_regret)
+
         cum_fraction_wrong.append(n_wrong / n_total)
+        fixed_fraction_wrong.append(fixed_n_wrong / n_total)
+        clin_fraction_wrong.append(clin_n_wrong / n_total)
 
 
     preds = np.array(preds)
@@ -178,13 +194,18 @@ for i in range(n_trials):
     all_regrets += [regrets]
     all_frac_wrong += [cum_fraction_wrong]
     all_fixed_regrets += [fixed_regrets]
+    all_fixed_frac_wrong += [fixed_fraction_wrong]
     all_clin_regrets += [clin_regrets]
+    all_clin_frac_wrong += [clin_fraction_wrong]    
 
 # compute 95% confidence interval for each performance mentric
 [regrets_low, regrets_up] = computeCI(all_regrets)
 [fixed_regrets_low, fixed_regrets_up] = computeCI(all_fixed_regrets)
 [clin_regrets_low, clin_regrets_up] = computeCI(all_clin_regrets)
+
 [fracs_wrong_low, fracs_wrong_up] = computeCI(all_frac_wrong)
+[fixed_fracs_wrong_low, fixed_fracs_wrong_up] = computeCI(all_fixed_frac_wrong)
+[clin_fracs_wrong_low, clin_fracs_wrong_up] = computeCI(all_clin_frac_wrong)
 
 plt.plot(np.mean(all_regrets, axis=0))
 plt.plot(np.mean(all_fixed_regrets, axis=0))
@@ -192,22 +213,39 @@ plt.plot(np.mean(all_clin_regrets, axis=0))
 plt.legend(['all regrets', 'all fixed regrets', 'all clin regrets'])
 plt.show()
 
-plt.plot(np.mean(all_regrets, axis=0))
-plt.plot(regrets_low, linestyle=':')
-plt.plot(regrets_up, linestyle=':')
-plt.plot(np.mean(all_fixed_regrets, axis=0))
-plt.plot(fixed_regrets_low, linestyle=':')
-plt.plot(fixed_regrets_up, linestyle=':')
-plt.plot(np.mean(all_clin_regrets, axis=0))
-plt.plot(clin_regrets_low, linestyle=':')
-plt.plot(clin_regrets_up, linestyle=':')
-plt.legend(['all regrets', 'all regret lower 95% CI bound', 'all regret upper 95% CI bound', \
-    'all fixed regrets', 'fixed regret lower 95% CI bound', 'fixed regret upper 95% CI bound' \
-    'all clinical regrets', 'clinical regret lower 95% CI bound', 'clinical regret upper 95% CI bound'])
+plt.plot(np.mean(all_regrets, axis=0), label='our regret')
+plt.plot(regrets_low, linestyle=':', label=None)
+plt.plot(regrets_up, linestyle=':', label=None)
+plt.plot(np.mean(all_fixed_regrets, axis=0), label='fixed baseline regret')
+plt.plot(fixed_regrets_low, linestyle=':', label=None)
+plt.plot(fixed_regrets_up, linestyle=':', label=None)
+plt.plot(np.mean(all_clin_regrets, axis=0), label='clinical baseline regret')
+plt.plot(clin_regrets_low, linestyle=':', label=None)
+plt.plot(clin_regrets_up, linestyle=':', label=None)
+plt.legend()
 plt.show()
 
-plt.plot(np.mean(all_frac_wrong, axis=0))
-plt.plot(fracs_wrong_low, linestyle=':')
-plt.plot(fracs_wrong_up, linestyle=':')
-plt.legend(['Fraction of incorrect dosage', 'lower 95% CI bound', 'upper 95% CI bound'])
+plt.plot(np.mean(all_frac_wrong, axis=0), label='ours')
+plt.plot(fracs_wrong_low, linestyle=':', label=None)
+plt.plot(fracs_wrong_up, linestyle=':', label=None)
+plt.plot(np.mean(all_fixed_frac_wrong, axis=0), label='fixed')
+plt.plot(fixed_fracs_wrong_low, linestyle=':', label=None)
+plt.plot(fixed_fracs_wrong_up, linestyle=':', label=None)
+plt.plot(np.mean(all_clin_frac_wrong, axis=0), label='clinical')
+plt.plot(clin_fracs_wrong_low, linestyle=':', label=None)
+plt.plot(clin_fracs_wrong_up, linestyle=':', label=None)
+plt.legend()
+plt.show()
+
+
+plt.plot(np.mean(all_frac_wrong, axis=0)[1000:], label='ours')
+plt.plot(fracs_wrong_low[1000:], linestyle=':', label=None)
+plt.plot(fracs_wrong_up[1000:], linestyle=':', label=None)
+plt.plot(np.mean(all_fixed_frac_wrong, axis=0)[1000:], label='fixed')
+plt.plot(fixed_fracs_wrong_low[1000:], linestyle=':', label=None)
+plt.plot(fixed_fracs_wrong_up[1000:], linestyle=':', label=None)
+plt.plot(np.mean(all_clin_frac_wrong, axis=0)[1000:], label='clinical')
+plt.plot(clin_fracs_wrong_low[1000:], linestyle=':', label=None)
+plt.plot(clin_fracs_wrong_up[1000:], linestyle=':', label=None)
+plt.legend()
 plt.show()
